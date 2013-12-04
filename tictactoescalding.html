@@ -1,0 +1,352 @@
+<pre>
+Suppose two million bots pair up and play one million random games of Tic Tac Toe!
+
+Two questions -
+1. How many of those 1 million games end in 5 moves ?
+2. How many unique 5-move games exist ?
+
+If you'd like to take a stab at it, here are the solutions -
+A1. If you play 1 million games, approximately 95238 games end in 5 moves. ( ie. 9.5%)
+A2. There are exactly 2880 5-moves games.
+
+Give it a good hour.
+If you are still wrestling with this problem, you would likely fall into one of two buckets -
+a. Have trouble with the math
+b. Have trouble with the programming
+(Hopefully you don't fall into both buckets, in which case, my apologies)
+
+Let's approach this problem from both the math & programming standpoint (proving Math==Programming, yet again :)
+
+First, let's recall the basics of Tic Tac Toe -
+A TicTacToe board is a 3 x 3 matrix, with 9 slots
+There are typically 2 players, o and x
+The players alternate.
+
+A player wins a game if he has 3 of his chips in a straight line.
+There are 8 possible straight lines you could draw in a 3 x 3 matrix.
+Hence, there are exactly 8 winning positions - 3 horizontal, 3 vertical, 2 diagonal (convince yourself)
+
+A game can be won in exactly 5, 6, 7, 8 or 9 moves. (Think about it. Its not hard, but its not immediately obvious)
+Otherwise the game ends in a draw.
+
+By a "random game of TicTacToe", we mean the bots aren't deliberately trying to win/lose. They don't have a strategy. They just pick a vacant slot at random and move.
+
+And that's really all there is to TicTacToe!
+
+So, the programming aspect -
+We'll use Scala to code up the game itself, and then use Scalding for the hard part (the computations)
+
+Insight #1. A TicTacToe board can be uniquely represented by a string.
+
+Look at a typical board
+
+x | x | o
+_________
+o | o | _
+_________
+_ | _ | x
+
+So it looks like player 'x' has played thrice, 'o' has played thrice, and there are 3 vacant slots.
+Reading this board from left to right, top to bottom, we have the 9 character string "xxooo___x"
+
+Insight #2. Two games are identical if they have the exact same moves in the exact same order (duh!).
+Since each board is a string with 9 characters, let's say a player wins the game in 5 moves.
+9 characters per move, 5 moves => a long string with 45 characters.
+So two games are identical if their corresponding 45-character strings are identical.
+
+Insight #3. Since the players alternate, there are only 2 possible sequence of players (duh!)
+Toss a coin.
+If heads, 'x' plays first. If tails, 'o'.
+Since there can be atmost 9 moves, the sequence either looks like "xoxoxoxox" or "oxoxoxoxo"
+
+Insight #4. Every game is done in 9 moves or less (double duh!)
+So start with the 9-character string "_________" ( aka the empty board )
+Look at the player sequence. Say its "xoxoxoxox"
+
+So pick off the first entry.
+Its 'x'
+Modify the string "_________" with 'x', at some random slot.
+So maybe you get  "__x______"
+
+So pick off the second entry.
+Its 'o'
+Modify the string "__x______" with 'o', at some random slot.
+So maybe you get  "__x_o____"
+
+So pick off the third entry.
+Its 'x'
+Modify the string "__x_o____" with 'x', at some random slot.
+So maybe you get  "__x_ox___"
+
+And keep going.... until you can't pick off any more entries.
+You are going to end up with 9 strings.
+
+Any functional programmer should instantly recognize that I've simply described a catamorphism.
+Any OO/procedural programmer should ...I don't know, do something else with their life :)
+
+Insight #5. Since there are exactly 8 ways to win a game, there are 16 possible strings that describe a winning entry.
+Line up three entries in the topmost row. That's (0,1,2), a winning configuration.
+So for example, if there's an 'x' in positions (0,1,2), that means 'x' has won the game
+ie. the string "xxx******" ( with '*' denoting an 'x' or a 'o' or a '_') means 'x' won.
+ie. the string "ooo******" means 'o' won.
+The other 7 configurations are (3,4,5), (6,7,8), (0,3,6),(1,4,7), (2,5,8), (0,4,8), (2,4,6)
+Each configuration => 2 winning strings. 8 conf => 16 strings.
+
+Insight #6. If no winning configuration satisfies the 9 strings, that simply means the game ended in a draw.
+
+Here's my TicTacToe Scala implementation - lets crack open the repl & give it a shot...
+<i>
+$ scala
+Welcome to Scala version 2.9.2 (Java HotSpot(TM) 64-Bit Server VM, Java 1.6.0_65).
+Type in expressions to have them evaluated.
+Type :help for more information.
+
+scala> :paste
+// Entering paste mode (ctrl-D to finish)
+
+object TicTacToe {
+
+  type C = Char
+  type Board = Seq[C]
+  type Boards = Seq[Board]
+  val empty = Seq.fill[C](9)('_')
+  val rnd = {
+    val x = util.Random
+    x.setSeed(123456) // want the same sequence of pseudorandom numbers
+    x
+  }
+
+  def printBoard(board:Board) = Seq(0,3,6).map(i => Seq(i,i+1,i+2).map(board(_)).mkString(" ")+"\n").mkString
+
+  def winner(board:Board) = Seq((0,1,2),(3,4,5), (6,7,8), (0,3,6),(1,4,7), (2,5,8), (0,4,8), (2,4,6))
+    .map{ i =>
+      val tics = Seq(i._1,i._2,i._3).map(board(_))
+      if (tics.count(_=='x')==3) 'x' else if (tics.count(_=='o')==3) 'o' else '_'
+  }.filterNot(_=='_').headOption
+
+  def play(player:C, board:Board):Board = {
+    val pos = rnd.nextInt(9)
+    if (board(pos) == '_') board.updated(pos,player) else play(player, board)
+  }
+
+  def playGame(show:Boolean):(String,Int) = {
+
+    val players = {
+      val (first, second) = if (rnd.nextDouble < 0.5) ('x','o') else ('o', 'x')
+      Seq.tabulate[C](9)(i=> if (i%2==0) first else second)
+    }
+
+    val allMoves = players.foldLeft(Seq(empty))((board,player)=> Seq(play(player,board.head)) ++ board).reverse
+    val whoWon = allMoves.indexWhere(winner(_).isDefined)
+    val game = if(whoWon == -1) allMoves else allMoves.slice(0, 1 + whoWon)
+    val gameStr = game.map(_.mkString).mkString("~")
+    val numMovesToWin = if( whoWon != -1) { game.size - 1 /* since first move is a blank board */ } else -1
+    if( show) {
+      game.zipWithIndex.foreach{ i=> val(board,move)=i; println("\nMove:"+move); print(printBoard(board)) }
+      if( whoWon != -1) println("We have a winner! " + winner(allMoves(whoWon)).get + " wins in " + numMovesToWin + " moves!")
+    }
+    (gameStr, numMovesToWin )
+  }
+}
+
+// Exiting paste mode, now interpreting.
+
+defined module TicTacToe
+
+scala> TicTacToe.playGame(true)
+
+Move:0
+_ _ _
+_ _ _
+_ _ _
+
+Move:1
+_ x _
+_ _ _
+_ _ _
+
+Move:2
+_ x _
+_ _ _
+_ o _
+
+Move:3
+_ x _
+_ x _
+_ o _
+
+Move:4
+_ x _
+_ x _
+o o _
+
+Move:5
+_ x _
+x x _
+o o _
+
+Move:6
+_ x _
+x x _
+o o o
+We have a winner! o wins in 6 moves!
+res1: (String, Int) = (_________~_x_______~_x_____o_~_x__x__o_~_x__x_oo_~_x_xx_oo_~_x_xx_ooo,6)
+
+scala>
+</i>
+
+So invoking the game TicTacToe.playGame(show=true) in the show mode displays the actual moves of the game, and tells you who won, and in how many moves. (You would obviously want to turn show off if you are running 1 million of these games :)
+The playGame(..) function returns a tuple - the string of all the moves, and how many moves it took to win.
+(If the game ended in a draw, we return -1 for the latter)
+Think of this tuple as a "row" with 2 "columns".
+
+Now for the hard part.
+Since each game returns a row with 2 columns,
+1 million games will result in a table with 1 million rows with 2 columns.
+Now we are into database territory.
+Run a group-by on the number of columns & count, you'd know how many games finished in 5 moves.
+
+So we need a language/dialect that does what select statements & stored-procs do ie. the grouping,counting etc. for a table with millions of rows.
+
+Scalding FTW!
+Scalding is a Scala DSL for Hadoop extensively used at Twitter & elsewhere (LinkedIn, Netflix, Ebay etc.)
+However, the working definition we'll adopt here is
+"Scalding == dialect to write stored-procedures in Scala"
+
+Let's write a completely general Scalding Job that lets us run the TicTacToe program any number of times ( million, billion, whatever), and groups by the number of moves it takes to win ( 5,6,7,8,9 or a draw; which we shall term -1)
+
+I claim the following (long) 1-liner does this!!!
+
+IterableSource(1 to n, 'times).read.mapTo('times -> ('game, 'nummoves)) { x:Int => TicTacToe.playGame(show) }.groupBy('nummoves) { _.size }.write(Tsv("tictactoe" + n))
+
+Essentially, the iterable source is a source that iterates over the range 1 to n, for a user input n.
+The read method transforms the source into a Pipe.
+A Pipe is a Scala object that has stored-proc-like capabilities, such as grouping(groupBy) & aggregation (size)
+A Pipe also lets us run multiple mapper operations in parallel via mapTo.
+So we simply map the numbers 1 through n to the TicTacToe game, thus playing n games in parallel.
+Each play results in 1 row, so we generate a giant table with million rows, 2 columns.
+We then group by the second column & aggregate, & write the results to a flatfile.
+
+That's the essence of the Scalding code.
+
+The same code in plain Scala will most likely
+a. won't be as clear in intent, as it is in Scalding
+b. run out of memory once you exceed say 10 million rows ie. won't scale.
+
+Playing a million games of TicTacToe in Scalding boils down to -
+<i>
+import com.twitter.scalding._
+
+class TicTacToe(args:Args) extends Job(args) {
+  val n = args("n").toInt
+  val show = args("show").toBoolean
+
+  val gamesAndMoves = IterableSource(1 to n, 'times)
+  .read
+  .mapTo('times -> ('game, 'nummoves)) { x:Int => TicTacToe.playGame(show) }
+
+  gamesAndMoves.groupBy('nummoves) { _.size }
+  .groupAll {
+    _.sortedReverseTake[(Int, Int)](('size, 'nummoves) -> 'top, 10)
+  }.map('top -> 'top){
+    x:List[(Int, Int)] =>
+    ("%5s\t%5s".format("Count", "Game") :: x.map( i => "%5d\t%5d".format( i._1, i._2 ))).mkString("\n")
+  }.write(Tsv("tictactoe" + n))
+
+  for( moves <- Seq(5,6,7,8,9,-1)) {
+    gamesAndMoves.filter('nummoves){ x:Int => x == moves }
+    .groupBy('game) { _.size }
+    .groupAll {
+      _.sortedReverseTake[(Int, String)](('size, 'game) -> 'top, 10000)
+    }.map('top -> 'top){
+      x:List[(Int, String)] => x.map( i => "%5d\t%s".format( i._1, i._2 )).mkString("\n")
+    }.write(Tsv("tictactoe"+moves + "moves" + n))
+  }
+}
+</i>
+Let's run this on a laptop (fine for upto a few hundred million runs, btw. You don't need a Hadoop cluster to run Scalding)
+$scald.rb --hdfs-local TicTacToe.scala --n 1000000 --show false
+
+This takes about 2 minutes, and once we're done, we get
+$ more tictactoe1000000/part-00000
+Count    Game
+264068      7
+225460      9
+200363      8
+126894     -1
+95401       5
+87814       6
+
+So of the 1 million games, 95401 games ended in exactly 5 moves.
+That answers the first question.
+
+We could rephrase the first question thusly - What are the chances a typical game takes exactly 5 moves ?
+That's obviously
+95401/1000000 = 0.095 = about 9.5%
+
+Let's now examine this problem from a probability standpoint.
+
+Claim: 0.095 = 2/21  (!!!!)
+
+So here we go-
+
+Proof:
+Say a game ends in 5 moves.
+Say x is the first player.
+Then x MUST win. (Think about it)
+There must be 3 x's & 2 o's, to complete the game in 5 moves.
+Put 3 xxx in a line - there's 8 ways you could do that ( 3 horizontal, 3 vertical & 2 diagonal)
+Once the x's are lined up, there are 6 empty slots.
+Two of these slots are taken up by the loser o.
+The remaining 4 are empty.
+So, in how many ways can you fill up 6 slots with 2 o and 4 _ ?
+6! / (4! * 2!) = 15
+So how many way could you possibly win ? 15 * 8 = 120
+Now, how many possible boards exist after 5 moves ?
+Well, a board has 9 slots. Fill 3 x's, 2 o's, 4 _'s.
+You could do that in 9!/(3! * 2! * 4!) = 9*4*7*5 = 1260
+
+The probability of winning in exactly 5 moves = 120/1260 = 2/21 = 0.095.
+Voila!
+
+Let's compute the unique number of 5-move games programatically.
+Since we've already griuped the unique 5-move strings, we simply count the number of such records.
+$ wc -l tictactoe5moves1000000/part-00000
+2880 tictactoe5moves1000000/part-00000
+
+So there's 2880 unique 5-move games.
+
+Let's now do the math (quite hard)
+Proof:
+Say you have a winning string in your 5th move.
+ie. say, you have "xxxoo____" in your 5th move.
+Then, there could be 3 possible 4th move strings - "_xxoo___", "x_xoo___", "xx_oo___"
+x does need an empty slot to move into, after all.
+So,
+For each of the 5th move strings, there can be 3 possible 4th move strings.
+For each of the 4th move strings, there can be 2 possible 3rd move strings.
+For each of the 3rd move strings, there can be 2 possible 2nd move strings.
+For each of the 2rd move strings, there can be 1 possible 1st move strings.
+
+3 * 2 * 2 = 12
+So, given a  winning string, you can arrive at that string in 12 unique ways.
+
+But how many winning strings are there ?
+Well, x can win in 8 ways. So can o. So that's 8+8 = 16
+A winning string looks like "www******"
+Where w is the winner (x or o)
+The * then denotes the loser l (o or x), and the blank tiles.
+So, in how many ways can you fill up 6 slots with 2 l and 4 _ ?
+6! / (4! * 2!) = 15
+16*15 = 240
+
+Ergo, you can have 12 * 240 = 2880 unique 5-move games!
+
+Bonus: If you've read so far, you might as well solve for 6 moves.
+So, How many of those 1 million games end in 6 moves ?
+Well, from our Scalding code above, we know its 87814.
+ie. the probability of winning the game in 6 moves is 87814/1000000 = 0.088 = about 8.8%
+
+Claim: 0.088 = 37/420 (!!!!)
+Prove it! This one's much harder. It kept me up for the better part of the night.
+</pre>
